@@ -1,3 +1,5 @@
 *.o 
 *.ppm
-capture 
+capture
+seqgen
+*.csv
