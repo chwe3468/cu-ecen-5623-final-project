@@ -7,20 +7,17 @@ CFLAGS= -O0 -g $(INCLUDE_DIRS) $(CDEFS)
 LIBS= 
 
 HFILES= 
-CFILES= seqgen.c seqgen2.c
+CFILES= seqgen.c
 
 SRCS= ${HFILES} ${CFILES}
 OBJS= ${CFILES:.c=.o}
 
-all:	seqgen seqgen2
+all:	seqgen
 
 clean:
 	-rm -f *.o *.d
-	-rm -f seqgen seqgen2
-
-seqgen2: seqgen2.o
-	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o -lpthread -lrt
-
+	-rm -f seqgen
+	
 seqgen: seqgen.o
 	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o -lpthread -lrt
 

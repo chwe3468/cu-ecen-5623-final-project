@@ -25,33 +25,21 @@
 // clock images (unique second hand / seconds) per image, you might use the 
 // following rates for each service:
 //
-// Sequencer - 30 Hz 
+// Sequencer - 1 Hz 
 //                   [gives semaphores to all other services]
-// Service_1 - 3 Hz  , every 10th Sequencer loop
+// Service_1 - 1 Hz  , every 10th Sequencer loop
 //                   [buffers 3 images per second]
 // Service_2 - 1 Hz  , every 30th Sequencer loop 
 //                   [time-stamp middle sample image with cvPutText or header]
-// Service_3 - 0.5 Hz, every 60th Sequencer loop
+// Service_3 - 1 Hz, every 60th Sequencer loop
 //                   [difference current and previous time stamped images]
-// Service_4 - 1 Hz, every 30th Sequencer loop
-//                   [save time stamped image with cvSaveImage or write()]
-// Service_5 - 0.5 Hz, every 60th Sequencer loop
-//                   [save difference image with cvSaveImage or write()]
-// Service_6 - 1 Hz, every 30th Sequencer loop
-//                   [write current time-stamped image to TCP socket server]
-// Service_7 - 0.1 Hz, every 300th Sequencer loop
-//                   [syslog the time for debug]
 //
 // With the above, priorities by RM policy would be:
 //
-// Sequencer = RT_MAX	@ 30 Hz
-// Servcie_1 = RT_MAX-1	@ 3 Hz
+// Sequencer = RT_MAX	@ 1 Hz
+// Servcie_1 = RT_MAX-1	@ 1 Hz
 // Service_2 = RT_MAX-2	@ 1 Hz
-// Service_3 = RT_MAX-3	@ 0.5 Hz
-// Service_4 = RT_MAX-2	@ 1 Hz
-// Service_5 = RT_MAX-3	@ 0.5 Hz
-// Service_6 = RT_MAX-2	@ 1 Hz
-// Service_7 = RT_MIN	0.1 Hz
+// Service_3 = RT_MAX-3	@ 1 Hz
 //
 // Here are a few hardware/platform configuration settings on your Jetson
 // that you should also check before running this code:
@@ -85,6 +73,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <pthread.h>
@@ -94,9 +83,9 @@
 
 #include <syslog.h>
 #include <sys/time.h>
-
+#include <sys/sysinfo.h>
 #include <errno.h>
-
+#include <signal.h>
 #define USEC_PER_MSEC (1000)
 #define NANOSEC_PER_SEC (1000000000)
 #define NUM_CPU_CORES (1)
@@ -106,7 +95,7 @@
 #define NUM_THREADS (3+1)
 
 //*****************************************************************************
-//
+//j
 // ECEN 5623 related define and global variables: for problem 3
 //
 //*****************************************************************************
@@ -122,8 +111,8 @@
 // void Service_6(void *threadp);
 // void Service_7(void *threadp);
 
-#define FRAME_NUM 1800 
-#define SEQ_NUM FRAME_NUM
+#define FRAME_NUM 10
+#define SEQ_NUM 10
 
 
 #ifdef SEQ_HZ_LARGER_THAN_1
@@ -131,8 +120,7 @@
 #define SPEED_UP_MUL    10
 #define SEQ_HZ  (1  *   SPEED_UP_MUL)
 #define SEQ_IN_SEC (0)
-#define SEQ_IN_USEC ((1000000/SEQ_HZ))
-#define SEQ_IN_NSEC ((long unsigned) (1000000000/SEQ_HZ))
+#define SEQ_IN_MSEC (100)
 
 #define SEV1_HZ (1 *   SPEED_UP_MUL)
 #define SEV2_HZ (1 *   SPEED_UP_MUL)
@@ -141,14 +129,18 @@
 #define SEV1_RATIO ((long long unsigned)(SEQ_HZ/SEV1_HZ))
 #define SEV2_RATIO ((long long unsigned)(SEQ_HZ/SEV2_HZ))
 #define SEV3_RATIO ((long long unsigned)(SEQ_HZ/SEV3_HZ))
+#define SEQ_PERIOD_MSEC 100
+#define SEV1_PERIOD_MSEC 100
+#define SEV2_PERIOD_MSEC 100
+#define SEV3_PERIOD_MSEC 100
 
 #else
+
 // Case where SEQ_HZ is equal to 1
 #define SPEED_UP_MUL    1
 #define SEQ_HZ  (1  *   SPEED_UP_MUL)
 #define SEQ_IN_SEC (1)
-#define SEQ_IN_USEC (0)
-#define SEQ_IN_NSEC (0)
+#define SEQ_IN_MSEC (0)
 
 #define SEV1_HZ (1 *   SPEED_UP_MUL)
 #define SEV2_HZ (1 *   SPEED_UP_MUL)
@@ -158,8 +150,15 @@
 #define SEV2_RATIO ((long long unsigned)(SEQ_HZ/SEV2_HZ))
 #define SEV3_RATIO ((long long unsigned)(SEQ_HZ/SEV3_HZ))
 
+#define SEQ_PERIOD_MSEC 1000
+#define SEV1_PERIOD_MSEC 1000
+#define SEV2_PERIOD_MSEC 1000
+#define SEV3_PERIOD_MSEC 1000
+
 // Case where SEQ_HZ is larger than 1 is not developed yet
 #endif
+
+
 
 
 //*****************************************************************************
@@ -196,15 +195,46 @@ int min(int arr[], uint32_t n)
             min = arr[i];
     return min;
 }
+
+void rebase_timeval(struct timeval * target_timeval, struct timeval* base_timeval)
+{
+    if(target_timeval->tv_usec < base_timeval->tv_usec)
+    {
+        target_timeval->tv_sec = target_timeval->tv_sec - base_timeval->tv_sec - 1;
+        target_timeval->tv_usec = (target_timeval->tv_usec+1000000) - base_timeval->tv_usec;
+    }
+    else
+    {
+        target_timeval->tv_sec = target_timeval->tv_sec - base_timeval->tv_sec;
+        target_timeval->tv_usec = target_timeval->tv_usec - base_timeval->tv_usec;
+    }
+    
+}
+
+int time_val_to_msec(struct timeval target_timeval)
+{
+    return (target_timeval.tv_sec*1000+target_timeval.tv_usec/1000);
+}
+
+int C_calculate(int sta_time, int end_time)
+{
+    return end_time - sta_time;
+}
+int D_calculate(int sta_time, int period)
+{
+    return sta_time + period;
+}
+
 //*****************************************************************************
 //
 // Function to print running history of the system, especially timestamp
 //
 //*****************************************************************************
+// all time are in unit of msec
 typedef struct service_info
 {
 	int sta_time;
-	int end_time
+	int end_time;
 	int C;
     int T;
     int D;
@@ -213,7 +243,7 @@ typedef struct service_info
 
 typedef struct all_service_info
 {
-	service_info_t Seq[FRAME_NUM];
+	service_info_t Seq[FRAME_NUM+1];
     service_info_t S1[FRAME_NUM];
     service_info_t S2[FRAME_NUM];
     service_info_t S3[FRAME_NUM];
@@ -226,30 +256,91 @@ void print_all_info(void)
     int i;
     // Service 1
     printf("For Service 1\n");
-    printf("Service count\t\tD(usec)\t\t\tC(usec)\t\t\tT(usec)\t\t\t\n");
-    for (i=0;i<90;i++)
+    printf("Service count\t\tD(msec)\t\t\tC(msec)\t\t\tT(msec)\t\t\t\n");
+    for (i=0;i<FRAME_NUM;i++)
     {
         printf("%d\t\t\t%d\t\t\t%d\t\t\t%d\t\t\t\n", i+1, info.S1[i].D, info.S1[i].C, info.S1[i].T);
     }
     printf("\n");
     // Service 2
     printf("For Service 2\n");
-    printf("Service count\t\tD(usec)\t\t\tC(usec)\t\t\tT(usec)\t\t\t\n");
-    for (i=0;i<30;i++)
+    printf("Service count\t\tD(msec)\t\t\tC(msec)\t\t\tT(msec)\t\t\t\n");
+    for (i=0;i<FRAME_NUM;i++)
     {
         printf("%d\t\t\t%d\t\t\t%d\t\t\t%d\t\t\t\n", i+1, info.S2[i].D, info.S2[i].C, info.S2[i].T);
     }
     printf("\n");
     // Service 3
     printf("For Service 3\n");
-    printf("Service count\t\tD(usec)\t\t\tC(usec)\t\t\tT(usec)\t\t\t\n");
-    for (i=0;i<15;i++)
+    printf("Service count\t\tD(msec)\t\t\tC(msec)\t\t\tT(msec)\t\t\t\n");
+    for (i=0;i<FRAME_NUM;i++)
     {
         printf("%d\t\t\t%d\t\t\t%d\t\t\t%d\t\t\t\n", i+1, info.S3[i].D, info.S3[i].C, info.S3[i].T);
     }
     printf("\n");
 }
+pthread_mutex_t timer_flag;
+static inline void timespec_add( struct timespec *result,
+                        const struct timespec *ts_1, const struct timespec *ts_2)
+{
+    result->tv_sec = ts_1->tv_sec + ts_2->tv_sec;
+    result->tv_nsec = ts_1->tv_nsec + ts_2->tv_nsec;
+    if( result->tv_nsec > 1000000000L ) {
+        result->tv_nsec -= 1000000000L;
+        result->tv_sec ++;
+    }
+}
+static void timer_thread ()
+{
+    pthread_mutex_unlock(&timer_flag);
+}
 
+int delete_periodic_timer(timer_t * timerid)
+{
+    // delete timer
+    if (timer_delete(*timerid) != 0)
+    {
+        printf("Error %d (%s) deleting timer!\n",errno,strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+int init_periodic_timer (timer_t * timerid, time_t second, long msec)
+{
+    // set up input arguments for timer_create()
+    struct sigevent sev;
+    memset(&sev,0,sizeof(struct sigevent));
+    sev.sigev_notify = SIGEV_THREAD;
+    sev.sigev_value.sival_ptr = NULL;
+    sev.sigev_notify_function = timer_thread;
+
+    // create timer
+    if ( timer_create(CLOCK_REALTIME,&sev,timerid) != 0 )
+    {
+        printf("Error %d (%s) creating timer!\n",errno,strerror(errno));
+        exit(1);
+    }
+
+    // set up input arguments for timer_settime()
+    struct timespec start_time;
+    if ( clock_gettime(CLOCK_REALTIME,&start_time) != 0 ) {
+        printf("Error %d (%s) getting clock %d time\n",errno,strerror(errno),CLOCK_MONOTONIC);
+        exit(1);
+    }
+    struct itimerspec new_value;
+    new_value.it_interval.tv_sec = 1;
+    new_value.it_interval.tv_nsec = 0;
+    timespec_add(&new_value.it_value,&start_time,&new_value.it_interval);
+    // set timer
+
+    if( timer_settime(*timerid, TIMER_ABSTIME, &new_value, NULL ) != 0 ) {
+        perror("Error setting timer");
+        exit(1);
+    }
+
+    return 0;
+}
 
 
 int abortTest=FALSE;
@@ -299,7 +390,7 @@ void main(void)
    CPU_ZERO(&allcpuset);
 
    for(i=0; i < NUM_CPU_CORES; i++)
-       CPU_SET(i, &allcpuset);e-stamp Tracing of Key Services
+       CPU_SET(i, &allcpuset);
 
    printf("Using CPUS=%d from total available.\n", CPU_COUNT(&allcpuset));
 
@@ -428,8 +519,9 @@ void main(void)
 void *Sequencer(void *threadp)
 {
     struct timeval current_time_val;
-    struct timespec delay_time = {SEQ_IN_SEC,SEQ_IN_NSEC}; // delay for 33.33 msec, 30 Hz
-    struct timespec remaining_time;
+    struct timeval sta_timeval;
+    struct timeval end_timeval;
+
     double current_time;
     double residual;
     int rc, delay_cnt=0;
@@ -440,34 +532,22 @@ void *Sequencer(void *threadp)
     syslog(LOG_CRIT, "Sequencer thread @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     printf("Sequencer thread @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
 
+
+    pthread_mutex_init(&timer_flag, NULL);
+    pthread_mutex_lock(&timer_flag);
+    // Initialize the timer for period PERIOD_T sec
+    timer_t timer_id = NULL;
+    int error_code = init_periodic_timer(&timer_id,SEQ_IN_SEC,SEQ_PERIOD_MSEC);
+    if(error_code < 0)
+    {
+        printf("cannot create periodic timer");
+        while(1);
+    }
     do
     {
-        delay_cnt=0; residual=0.0;
+        pthread_mutex_lock(&timer_flag);
 
-        //gettimeofday(&current_time_val, (struct timezone *)0);
-        //syslog(LOG_CRIT, "Sequencer thread prior to delay @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-        do
-        {
-            rc=nanosleep(&delay_time, &remaining_time);
-
-            if(rc == EINTR)
-            { 
-                residual = remaining_time.tv_sec + ((double)remaining_time.tv_nsec / (double)NANOSEC_PER_SEC);
-
-                if(residual > 0.0) printf("residual=%lf, sec=%d, nsec=%d\n", residual, (int)remaining_time.tv_sec, (int)remaining_time.tv_nsec);
- 
-                delay_cnt++;
-            }
-            else if(rc < 0)
-            {
-                perror("Sequencer nanosleep");
-                exit(-1);
-            }
-           
-        } while((residual > 0.0) && (delay_cnt < 100));
-
-        seqCnt++;
-        gettimeofday(&current_time_val, (struct timezone *)0);
+        gettimeofday(&sta_timeval, (struct timezone *)0);
         //syslog(LOG_CRIT, "Sequencer cycle %llu @ sec=%d, usec=%d\n", seqCnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
 
 
@@ -485,8 +565,9 @@ void *Sequencer(void *threadp)
         // Service_3 = RT_MAX-3	@ 1 Hz
         if((seqCnt % SEV3_RATIO) == 0) sem_post(&semS3);
 
-        gettimeofday(&current_time_val, (struct timezone *)0);
+        gettimeofday(&end_timeval, (struct timezone *)0);
         //syslog(LOG_CRIT, "Sequencer release all sub-services @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
+        seqCnt++;
 
     } while(!abortTest && (seqCnt < threadParams->sequencePeriods));
 
@@ -494,6 +575,14 @@ void *Sequencer(void *threadp)
     
     abortS1=TRUE; abortS2=TRUE; abortS3=TRUE;
     
+    // delete the timer for period 10 sec
+    if (timer_id == NULL)
+    {
+        syslog(LOG_USER, "Cannot Delete timer");
+        exit(1);
+    }
+    
+    error_code = delete_periodic_timer(&timer_id);
 
     pthread_exit((void *)0);
 }
@@ -511,22 +600,26 @@ void *Service_1(void *threadp)
     syslog(LOG_CRIT, "Frame Sampler thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     printf("Frame Sampler thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
 
+    struct timeval sta_timeval;
+    struct timeval end_timeval;
     while(!abortS1)
     {
         sem_wait(&semS1);
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S1[S1Cnt].T = SEV1_RATIO*SEQ_IN_USEC;
-        info.S1[S1Cnt].D = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) +\
-                           SEV1_RATIO*SEQ_IN_USEC;
+        gettimeofday(&sta_timeval, (struct timezone *)0);
+        rebase_timeval(&sta_timeval,&start_time_val);
+        info.S1[S1Cnt].sta_time = time_val_to_msec(sta_timeval);
+        info.S1[S1Cnt].T = SEV1_PERIOD_MSEC;
+        info.S1[S1Cnt].D = D_calculate(info.S1[S1Cnt].sta_time,SEV3_PERIOD_MSEC);
 
         // workload here
-        FIB_TEST(FIB_LIMIT_FOR_32_BIT,40000);
+        int i;
+        for(i=0;i<10000000;i++);
 
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S1[S1Cnt].C = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) -\
-                            (info.S1[S1Cnt].D-info.S1[S1Cnt].T);
+
+        gettimeofday(&end_timeval, (struct timezone *)0);
+        rebase_timeval(&end_timeval,&start_time_val);
+        info.S1[S1Cnt].end_time = time_val_to_msec(end_timeval);
+        info.S1[S1Cnt].C = C_calculate(info.S1[S1Cnt].sta_time, info.S1[S1Cnt].end_time);
         S1Cnt++;
 /*        syslog(LOG_CRIT, "Frame Sampler release %llu @ sec=%d, msec=%d\n", S1Cnt, 
             (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);*/
@@ -547,22 +640,25 @@ void *Service_2(void *threadp)
     syslog(LOG_CRIT, "Time-stamp with Image Analysis thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     printf("Time-stamp with Image Analysis thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
 
+    struct timeval sta_timeval;
+    struct timeval end_timeval;
     while(!abortS2)
     {
         sem_wait(&semS2);
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S2[S2Cnt].T = SEV2_RATIO*SEQ_IN_USEC;
-        info.S2[S2Cnt].D = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) +\
-                            SEV2_RATIO*SEQ_IN_USEC;
+        gettimeofday(&sta_timeval, (struct timezone *)0);
+        rebase_timeval(&sta_timeval,&start_time_val);
+        info.S2[S2Cnt].sta_time = time_val_to_msec(sta_timeval);
+        info.S2[S2Cnt].T = SEV2_PERIOD_MSEC;
+        info.S2[S2Cnt].D = D_calculate(info.S2[S2Cnt].sta_time,SEV3_PERIOD_MSEC);
 
         // workload here
-        FIB_TEST(FIB_LIMIT_FOR_32_BIT,40000);
+        int i;
+        for(i=0;i<10000000;i++);
 
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S2[S2Cnt].C = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) -\
-                            (info.S2[S2Cnt].D-info.S2[S2Cnt].T);
+        gettimeofday(&end_timeval, (struct timezone *)0);
+        rebase_timeval(&end_timeval,&start_time_val);
+        info.S2[S2Cnt].end_time = time_val_to_msec(end_timeval);
+        info.S2[S2Cnt].C = C_calculate(info.S2[S2Cnt].sta_time, info.S2[S2Cnt].end_time);
         S2Cnt++;
         syslog(LOG_CRIT, "Time-stamp with Image Analysis release %llu @ sec=%d, msec=%d\n", S2Cnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     }
@@ -580,22 +676,26 @@ void *Service_3(void *threadp)
     gettimeofday(&current_time_val, (struct timezone *)0);
     syslog(LOG_CRIT, "Difference Image Proc thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     printf("Difference Image Proc thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-    int start_time = (int)current_time_val.tv_usec;
+
+    struct timeval sta_timeval;
+    struct timeval end_timeval;
     while(!abortS3)
     {
         sem_wait(&semS3);
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S3[S3Cnt].T = SEV3_RATIO*SEQ_IN_USEC;
-        info.S3[S3Cnt].D = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) +\
-                            SEV3_RATIO*SEQ_IN_USEC;
+        gettimeofday(&sta_timeval, (struct timezone *)0);
+        rebase_timeval(&sta_timeval,&start_time_val);
+        info.S3[S3Cnt].sta_time = time_val_to_msec(sta_timeval);
+        info.S3[S3Cnt].T = SEV3_PERIOD_MSEC;
+        info.S3[S3Cnt].D = D_calculate(info.S3[S3Cnt].sta_time,SEV3_PERIOD_MSEC);
 
         // workload here
-        FIB_TEST(FIB_LIMIT_FOR_32_BIT,40000);
-        gettimeofday(&current_time_val, (struct timezone *)0);
-        info.S3[S3Cnt].C = (int)1000000*(current_time_val.tv_sec-start_time_val.tv_sec) +\
-                           (int)(current_time_val.tv_usec-start_time_val.tv_usec) -\
-                            (info.S3[S3Cnt].D-info.S3[S3Cnt].T);
+        int i;
+        for(i=0;i<10000000;i++);
+
+        gettimeofday(&end_timeval, (struct timezone *)0);
+        rebase_timeval(&end_timeval,&start_time_val);
+        info.S3[S3Cnt].end_time = time_val_to_msec(end_timeval);
+        info.S3[S3Cnt].C = C_calculate(info.S3[S3Cnt].sta_time, info.S3[S3Cnt].end_time);
         S3Cnt++;
         syslog(LOG_CRIT, "Difference Image Proc release %llu @ sec=%d, msec=%d\n", S3Cnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     }
