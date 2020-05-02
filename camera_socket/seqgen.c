@@ -579,7 +579,7 @@ void *Sequencer(void *threadp)
     struct timeval current_time_val;
     struct timeval sta_timeval;
     struct timeval end_timeval;
-
+    capture_write(0,"test_image.ppm");
     double current_time;
     double residual;
     int rc, delay_cnt=0;
