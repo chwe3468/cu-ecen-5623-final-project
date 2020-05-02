@@ -392,11 +392,11 @@ int init_periodic_timer (timer_t * timerid, time_t second, long msec)
 // Network
 //
 //*****************************************************************************
+char local_buf[BUF_SIZE];
 struct addrinfo * res;
 int sockfd;
 void send_thread(char * filename)
 {
-    struct addrinfo * p = res;
     // inifite while loop for sending image
     int error_code = 0;
     /* Obtain timer_flag */
@@ -410,11 +410,11 @@ void send_thread(char * filename)
 
     /* Read all content */
     // create a buffer for sending message
-    void * local_buf = malloc(BUF_SIZE);
-    if(local_buf == NULL)
-    {
-        printf("no more space\n");
-    }
+    // void * local_buf = malloc(BUF_SIZE);
+    // if(local_buf == NULL)
+    // {
+    //     printf("no more space\n");
+    // }
     int num_read = 1;
     bool EOF_flag = false;
     ssize_t read_size;
@@ -435,16 +435,16 @@ void send_thread(char * filename)
         else
         {
             num_read++;
-            local_buf = realloc(local_buf,num_read*BUF_SIZE);
-            if(local_buf == NULL)
-            {
-                printf("no more space\n");
-            }
+            // local_buf = realloc(local_buf,num_read*BUF_SIZE);
+            // if(local_buf == NULL)
+            // {
+            //     printf("no more space\n");
+            // }
         }
     }
     /* Add '\n''#''EOF' at the end of buffer */
     total_read_size = total_read_size + 3;
-    local_buf = realloc(local_buf,total_read_size);
+    //local_buf = realloc(local_buf,total_read_size);
     ((char *)local_buf)[total_read_size-3] = '\n';
     ((char *)local_buf)[total_read_size-2] = '#';
     ((char *)local_buf)[total_read_size-1] = 0x4;
@@ -464,7 +464,7 @@ void send_thread(char * filename)
 
 
     // free local_buf
-    free(local_buf);
+    //free(local_buf);
 
 }
 
