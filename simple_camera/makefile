@@ -1,35 +1,46 @@
-INCLUDE_DIRS = 
-LIB_DIRS = 
-CC=g++
+# Name: makefile
+# Description: makefile for project 1 for ECEN 5013 AESD
+# Toolchain: gcc compiler version 7.4.0
 
-CDEFS=
-CFLAGS= -O0 -g $(INCLUDE_DIRS) $(CDEFS)
-LIBS= -lrt
-CPPLIBS= -L/usr/lib -lopencv_core -lopencv_flann -lopencv_video
 
-HFILES= 
-CFILES= 
-CPPFILES= capture.cpp
+CROSS_COMPILE =# Cross compile option for arm-unknown-linux-gnueabi-
 
-SRCS= ${HFILES} ${CFILES}
-CPPOBJS= ${CPPFILES:.cpp=.o}
+ifeq ($(CC),)
+	CC = $(CROSS_COMPILE)gcc
+endif
 
-all:	capture 
+ifeq ($(LD),)
+	LD = ld  # Linker
+endif
+
+ifeq ($(CCFLAGS),)
+	CCFLAGS = -O0 -g -Wall -Werror 
+endif
+
+ifeq ($(LDFLAGS),)
+	LDFLAGS = -pthread -lrt
+endif
+
+DEPS = #queue.h # header files
+OBJ = capture.o
+CPPLIBS= -lopencv_core -lopencv_flann -lopencv_video
+TARGET = capture
+
+
+all: $(TARGET)
+
+
+capture: $(OBJ)
+	$(CC) $(CCFLAGS) -o $@ $^ $(LDFLAGS) -lstdc++ `pkg-config --libs opencv` $(CPPLIBS) 
+
+# %.o: %.c $(DEPS)
+# 	$(CC) $(CCFLAGS) -c -o $@ $<  
 
 clean:
-	-rm -f *.o *.d
-	-rm -f capture
+	-rm -f capture  *.o *.s *.d
 
-distclean:
-	-rm -f *.o *.d
+#.c.o:
+#	$(CC) $(CCFLAGS) -c $<
 
-capture: capture.o
-	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $@.o `pkg-config --libs opencv` $(CPPLIBS)
-
-depend:
-
-.c.o:
-	$(CC) $(CFLAGS) -c $<
-
-.cpp.o:
-	$(CC) $(CFLAGS) -c $<
+#.cpp.o:
+#	$(CC) $(CCFLAGS) -lstdc++ -c $<
