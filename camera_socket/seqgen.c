@@ -396,7 +396,7 @@ struct addrinfo * res;
 int sockfd;
 void send_thread(char * filename)
 {
-
+    struct addrinfo * p = res;
     // inifite while loop for sending image
     int error_code = 0;
 
@@ -450,6 +450,31 @@ void send_thread(char * filename)
     /* Close /var/tmp/cap_stamped.ppm */
     error_code = close(fd);
 
+    /* check NULL */
+    if(p == NULL){
+        syslog(LOG_ERR, "client: client failed to connect: %s", strerror(errno));
+    }
+
+    if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
+            perror("client: socket");
+    }
+
+    /* Connect to Target ip else just dont send anything*/
+    if(connect(sockfd, p->ai_addr, p->ai_addrlen) == -1)
+    {
+        close(sockfd);
+        perror("client: connection failed");
+    }
+    else
+    {
+        /* Send image to Sam over TCP */
+        ssize_t send_size = send(sockfd,local_buf,total_read_size,0);
+        if (send_size<0)
+        {
+            printf("send wrong\n");
+        }
+        syslog(LOG_USER, "Image sent:send_size = %ld",send_size);
+    }
 
 
     /* Send image to Sam over TCP */
@@ -460,7 +485,7 @@ void send_thread(char * filename)
     }
     syslog(LOG_USER, "Image sent:send_size = %ld",send_size);
 
-
+    close(sockfd);
     // free local_buf
     free(local_buf);
 
@@ -508,19 +533,6 @@ void main(void)
         printf("%s",gai_strerror(error_code));
         exit(1);
     }
-
-    if((sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1){
-            perror("client: socket");
-    }
-
-    /* Connect to Target ip else just dont send anything*/
-    if(connect(sockfd, res->ai_addr, res->ai_addrlen) == -1)
-    {
-        close(sockfd);
-        perror("client: connection failed");
-    }
-
-
 
     /********************************************************************************/
     struct timeval current_time_val;
@@ -659,7 +671,7 @@ void main(void)
     for(i=0;i<NUM_THREADS;i++)
         pthread_join(threads[i], NULL);
     
-    close(sockfd);
+    
     // freeaddrinfo so that no memory leak
 
     freeaddrinfo(res);
@@ -809,9 +821,11 @@ void *Service_2(void *threadp)
         pthread_mutex_lock(&image_lock);
         gettimeofday(&sta_timeval, (struct timezone *)0);
         rebase_timeval(&sta_timeval,&start_time_val);
+        
         info.S2[S2Cnt].sta_time = time_val_to_msec(sta_timeval);
         info.S2[S2Cnt].T = SEV2_PERIOD_MSEC;
-        info.S2[S2Cnt].D = D_calculate(info.S2[S2Cnt].sta_time,SEV2_PERIOD_MSEC);
+        info.S2[S2Cnt].D = info.S1[S2Cnt].D;
+        
 
         // workload here
         char filename[30];
@@ -823,7 +837,7 @@ void *Service_2(void *threadp)
         info.S2[S2Cnt].end_time = time_val_to_msec(end_timeval);
         info.S2[S2Cnt].C = C_calculate(info.S2[S2Cnt].sta_time, info.S2[S2Cnt].end_time);
         S2Cnt++;
-        syslog(LOG_CRIT, "Time-stamp with Image Analysis release %llu @ sec=%d, msec=%d\n", S2Cnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
+        //syslog(LOG_CRIT, "Time-stamp with Image Analysis release %llu @ sec=%d, msec=%d\n", S2Cnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
     }
 
     pthread_exit((void *)0);    

@@ -244,7 +244,7 @@ int aesd_recv(int sockfd)
 
 	// free local_buf
 	free(local_buf);
-
+	count++;
 	return 0;
 }
 

@@ -30,6 +30,7 @@
 #define CAPTURE_APP
 #define PPM_HEADER_SIZE 3
 #define BUF_SIZE 925696
+#define NUM_CPU_CORES 1
 //#define DATE_TIME
 //#define SEC_MSEC_TIME
 
@@ -200,6 +201,9 @@ int capture_write(int dev, char * filename)
     return 0;
 }
 
+
+void print_scheduler(void);
+
 #ifdef CAPTURE_APP
 int main( int argc, char** argv )
 {
@@ -234,3 +238,25 @@ int main( int argc, char** argv )
     return 0;
 }
 #endif
+
+void print_scheduler(void)
+{
+   int schedType;
+
+   schedType = sched_getscheduler(getpid());
+
+   switch(schedType)
+   {
+       case SCHED_FIFO:
+           printf("Pthread Policy is SCHED_FIFO\n");
+           break;
+       case SCHED_OTHER:
+           printf("Pthread Policy is SCHED_OTHER\n"); exit(-1);
+         break;
+       case SCHED_RR:
+           printf("Pthread Policy is SCHED_RR\n"); exit(-1);
+           break;
+       default:
+           printf("Pthread Policy is UNKNOWN\n"); exit(-1);
+   }
+}
