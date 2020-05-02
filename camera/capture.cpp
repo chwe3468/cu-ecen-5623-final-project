@@ -30,6 +30,7 @@
 #define CAPTURE_APP
 #define PPM_HEADER_SIZE 3
 #define BUF_SIZE 925696
+#define SEC_MSEC_TIME
 using namespace cv;
 //extern "C" int capture_write(int);
 int capture_write(int dev, char * filename)
@@ -54,13 +55,27 @@ int capture_write(int dev, char * filename)
     /* Add timestamp directly in image */
     struct tm *tmp ;
     char MY_TIME[100];
+    char MY_SUB_TIME[40];
     struct timeval current_time_val;
     gettimeofday(&current_time_val, (struct timezone *)0);
+    
+
+#ifdef DATE_TIME
     tmp = localtime( &(current_time_val.tv_sec));
     // using strftime to display time
-    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n sec=%d, msec=%d\n", tmp,(int)current_time_val.tv_sec,(int)current_time_val.tv_nsec/1000000);
+    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n sec=%d, msec=%d\n", tmp,(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
+    sscanf();
     size_t str_size = strlen(MY_TIME);
     putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
+#endif
+
+
+#ifdef SEC_MSEC_TIME
+    // using strftime to display time
+    sprintf(MY_TIME, "sec=%d, msec=%d\n",(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
+    size_t str_size = strlen(MY_TIME);
+    putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
+#endif
 
 
 
