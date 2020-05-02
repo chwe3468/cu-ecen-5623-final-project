@@ -80,6 +80,9 @@
 #include <sched.h>
 #include <time.h>
 #include <semaphore.h>
+// File related
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <syslog.h>
 #include <sys/time.h>
@@ -279,6 +282,49 @@ void print_all_info(void)
     }
     printf("\n");
 }
+void print_all_info_to_csv(void)
+{
+    int i;
+    char my_buf[256];
+    /* open csv file */
+    int fd = open("record.csv",
+            O_WRONLY|O_CREAT,
+            S_IRWXU|S_IRWXG|S_IRWXO);
+    sprintf(my_buf,"Sevice Name, Count, Start Time, End Time, C, T, D\n");
+    int write_size = write(fd, my_buf, strlen(my_buf));
+    // Sequencer
+    for (i=0;i<FRAME_NUM;i++)
+    {
+        sprintf(my_buf,"Seq, %d, %d, %d, %d, %d, %d\n",i+1,info.Seq[i].sta_time, info.Seq[i].end_time, info.Seq[i].C, info.Seq[i].T, info.Seq[i].D);
+
+        write_size = write(fd, my_buf, strlen(my_buf));
+    }
+
+    // Service 1
+
+    for (i=0;i<FRAME_NUM;i++)
+    {
+        sprintf(my_buf,"S1, %d, %d, %d, %d, %d, %d\n",i+1,info.S1[i].sta_time, info.S1[i].end_time, info.S1[i].C, info.S1[i].T, info.S1[i].D);
+        write_size = write(fd, my_buf, strlen(my_buf));
+    }
+    
+    // Service 2
+    for (i=0;i<FRAME_NUM;i++)
+    {
+        sprintf(my_buf,"S2, %d, %d, %d, %d, %d, %d\n",i+1,info.S2[i].sta_time, info.S2[i].end_time, info.S2[i].C, info.S2[i].T, info.S2[i].D);
+        write_size = write(fd, my_buf, strlen(my_buf));
+    }
+    // Service 3
+    for (i=0;i<FRAME_NUM;i++)
+    {
+        sprintf(my_buf,"S3, %d, %d, %d, %d, %d, %d\n",i+1,info.S3[i].sta_time, info.S3[i].end_time, info.S3[i].C, info.S3[i].T, info.S3[i].D);
+        write_size = write(fd, my_buf, strlen(my_buf));
+    }
+    close(fd);
+}
+
+
+
 pthread_mutex_t timer_flag;
 static inline void timespec_add( struct timespec *result,
                         const struct timespec *ts_1, const struct timespec *ts_2)
@@ -508,11 +554,14 @@ void main(void)
         printf("pthread_create successful for sequeencer service 0\n");
 
 
-   for(i=0;i<NUM_THREADS;i++)
-       pthread_join(threads[i], NULL);
-   print_all_info();
+    for(i=0;i<NUM_THREADS;i++)
+        pthread_join(threads[i], NULL);
 
-   printf("\nTEST COMPLETE\n");
+    print_all_info();
+
+    print_all_info_to_csv();
+
+    printf("\nTEST COMPLETE\n");
 }
 
 
@@ -548,7 +597,10 @@ void *Sequencer(void *threadp)
         pthread_mutex_lock(&timer_flag);
 
         gettimeofday(&sta_timeval, (struct timezone *)0);
-        //syslog(LOG_CRIT, "Sequencer cycle %llu @ sec=%d, usec=%d\n", seqCnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
+        rebase_timeval(&sta_timeval,&start_time_val);
+        info.Seq[seqCnt].sta_time = time_val_to_msec(sta_timeval);
+        info.Seq[seqCnt].T = SEQ_PERIOD_MSEC;
+        info.Seq[seqCnt].D = D_calculate(info.Seq[seqCnt].sta_time,SEQ_PERIOD_MSEC);
 
 
         if(delay_cnt > 1) printf("Sequencer looping delay %d\n", delay_cnt);
@@ -566,7 +618,10 @@ void *Sequencer(void *threadp)
         if((seqCnt % SEV3_RATIO) == 0) sem_post(&semS3);
 
         gettimeofday(&end_timeval, (struct timezone *)0);
-        //syslog(LOG_CRIT, "Sequencer release all sub-services @ sec=%d, msec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
+        rebase_timeval(&end_timeval,&start_time_val);
+        info.Seq[seqCnt].end_time = time_val_to_msec(end_timeval);
+        info.Seq[seqCnt].C = C_calculate(info.Seq[seqCnt].sta_time, info.Seq[seqCnt].end_time);
+
         seqCnt++;
 
     } while(!abortTest && (seqCnt < threadParams->sequencePeriods));
