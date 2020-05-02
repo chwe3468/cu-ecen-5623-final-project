@@ -828,9 +828,9 @@ void *Service_2(void *threadp)
         
 
         // workload here
-        char filename[30];
-        sprintf(filename, "./images/cap_%06lld.ppm",S2Cnt);
-        send_thread(filename);
+        // char filename[30];
+        // sprintf(filename, "./images/cap_%06lld.ppm",S2Cnt);
+        // send_thread(filename);
 
         gettimeofday(&end_timeval, (struct timezone *)0);
         rebase_timeval(&end_timeval,&start_time_val);

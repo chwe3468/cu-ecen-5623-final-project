@@ -26,6 +26,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+// name related
+#include <sys/utsname.h>
 
 //#define CAPTURE_APP
 #define PPM_HEADER_SIZE 3
@@ -33,7 +35,7 @@
 #define NUM_CPU_CORES 1
 #define DATE_TIME
 #define SEC_MSEC_TIME
-
+#define NAME
 
 #define COMMENT_IN_IMAGE
 
@@ -57,14 +59,16 @@ int capture_write(int dev, char * filename)
     // resize image down to 320x240
     // resize(frame, frame_resized, Size(320,240), 0.5, 0.5,INTER_LINEAR);
 
-
     /* Add timestamp directly in image */
     struct tm *tmp ;
-    char MY_TIME[100];
+    char MY_TIME[128];
     char MY_SUB_TIME[40];
+    char MY_NAME_BUF[128];
     struct timeval current_time_val;
     gettimeofday(&current_time_val, (struct timezone *)0);
-    
+
+
+
 
 #ifdef DATE_TIME
     tmp = localtime( &(current_time_val.tv_sec));
@@ -82,6 +86,13 @@ int capture_write(int dev, char * filename)
     putText(frame,MY_SUB_TIME,Point(10, 80),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
 #endif
 
+#ifdef NAME
+    struct utsname MY_NAME;
+    uname(&MY_NAME);
+    sprintf(MY_NAME_BUF, "# %s \n",MY_NAME.nodename);
+    size_t str_name_size = strlen(MY_NAME_BUF);
+    putText(frame,MY_NAME_BUF,Point(10, 120),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
+#endif
 
 
 
@@ -124,7 +135,7 @@ int capture_write(int dev, char * filename)
         // update total_size
         total_read_size = ((num_read-1)*BUF_SIZE)+read_size;
         // check if read '\n'
-        if(read_size <= BUF_SIZE)
+        if(read_size < BUF_SIZE)
         {
             EOF_flag = true;
         }
@@ -187,6 +198,20 @@ int capture_write(int dev, char * filename)
         //exit(1);
     }
 #endif
+
+#ifdef NAME
+    // using strftime to display sub time
+    write_size = write(fd, MY_NAME_BUF, str_name_size);
+    // Check for error
+    if (write_size != str_name_size)
+    {
+        // Use errno to print error
+        perror("timestamp write error");
+        //exit(1);
+    }
+#endif
+
+
     write_size = write(fd, ((char *)local_buf)+PPM_HEADER_SIZE, (size_t) total_read_size-PPM_HEADER_SIZE);
     // Check for error
     if (write_size < total_read_size-PPM_HEADER_SIZE)
