@@ -41,9 +41,6 @@ using namespace cv;
 extern "C" int capture_write(int dev, char * filename);
 int capture_write(int dev, char * filename)
 {
-    struct timeval start_timeval;
-    gettimeofday(&start_timeval, (struct timezone *)0);
-
     VideoCapture cap(dev); // open the default camera
     if(!cap.isOpened())  // check if we succeeded
     {
@@ -209,11 +206,6 @@ int capture_write(int dev, char * filename)
         perror("close file error");
     }
 #endif
-    struct timeval end_timeval;
-    gettimeofday(&end_timeval, (struct timezone *)0);
-
-    syslog(LOG_CRIT, "Cap sta time thread @ sec=%d, msec=%d\n", (int)(start_timeval.tv_sec), (int)start_timeval.tv_usec/1000);
-    syslog(LOG_CRIT, "Cap end time thread @ sec=%d, msec=%d\n", (int)(end_timeval.tv_sec), (int)end_timeval.tv_usec/1000);
 
     // the camera will be deinitialized automatically in VideoCapture destructor
     return 0;
