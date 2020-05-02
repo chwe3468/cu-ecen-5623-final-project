@@ -72,7 +72,7 @@ int capture_write(int dev, char * filename)
 
 #ifdef SEC_MSEC_TIME
     // using strftime to display time
-    sprintf(MY_TIME, "sec=%d, msec=%d\n",(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
+    sprintf(MY_TIME, "# sec=%d, msec=%d\n",(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
     size_t str_size = strlen(MY_TIME);
     putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
 #endif
