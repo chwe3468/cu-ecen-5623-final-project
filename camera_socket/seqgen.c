@@ -75,7 +75,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <stdbool.h>
 #include <pthread.h>
 #include <sched.h>
 #include <time.h>
@@ -89,14 +89,24 @@
 #include <sys/sysinfo.h>
 #include <errno.h>
 #include <signal.h>
+
+// Network related
+#include <netdb.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
 #define USEC_PER_MSEC (1000)
 #define NANOSEC_PER_SEC (1000000000)
 #define NUM_CPU_CORES (1)
 #define TRUE (1)
 #define FALSE (0)
-
-#define NUM_THREADS (3+1)
-
+#define CHUTAO_IP_ADDR "10.0.0.89" // local
+#define PORT "9000"
+#define SAM_IP_ADDR "73.78.219.44" // Sam's public
+#define NUM_THREADS (2+1)
+#define BUF_SIZE 925696
 //*****************************************************************************
 //j
 // ECEN 5623 related define and global variables: for problem 3
@@ -127,15 +137,12 @@
 
 #define SEV1_HZ (1 *   SPEED_UP_MUL)
 #define SEV2_HZ (1 *   SPEED_UP_MUL)
-#define SEV3_HZ (1 *   SPEED_UP_MUL)
 
 #define SEV1_RATIO ((long long unsigned)(SEQ_HZ/SEV1_HZ))
 #define SEV2_RATIO ((long long unsigned)(SEQ_HZ/SEV2_HZ))
-#define SEV3_RATIO ((long long unsigned)(SEQ_HZ/SEV3_HZ))
 #define SEQ_PERIOD_MSEC 100
 #define SEV1_PERIOD_MSEC 100
 #define SEV2_PERIOD_MSEC 100
-#define SEV3_PERIOD_MSEC 100
 
 #else
 
@@ -147,21 +154,16 @@
 
 #define SEV1_HZ (1 *   SPEED_UP_MUL)
 #define SEV2_HZ (1 *   SPEED_UP_MUL)
-#define SEV3_HZ (1 *   SPEED_UP_MUL)
 
 #define SEV1_RATIO ((long long unsigned)(SEQ_HZ/SEV1_HZ))
 #define SEV2_RATIO ((long long unsigned)(SEQ_HZ/SEV2_HZ))
-#define SEV3_RATIO ((long long unsigned)(SEQ_HZ/SEV3_HZ))
 
 #define SEQ_PERIOD_MSEC 1000
 #define SEV1_PERIOD_MSEC 1000
 #define SEV2_PERIOD_MSEC 1000
-#define SEV3_PERIOD_MSEC 1000
 
 // Case where SEQ_HZ is larger than 1 is not developed yet
 #endif
-
-
 
 
 //*****************************************************************************
@@ -273,14 +275,7 @@ void print_all_info(void)
         printf("%d\t\t\t%d\t\t\t%d\t\t\t%d\t\t\t\n", i+1, info.S2[i].D, info.S2[i].C, info.S2[i].T);
     }
     printf("\n");
-    // Service 3
-    printf("For Service 3\n");
-    printf("Service count\t\tD(msec)\t\t\tC(msec)\t\t\tT(msec)\t\t\t\n");
-    for (i=0;i<FRAME_NUM;i++)
-    {
-        printf("%d\t\t\t%d\t\t\t%d\t\t\t%d\t\t\t\n", i+1, info.S3[i].D, info.S3[i].C, info.S3[i].T);
-    }
-    printf("\n");
+
 }
 void print_all_info_to_csv(void)
 {
@@ -314,12 +309,7 @@ void print_all_info_to_csv(void)
         sprintf(my_buf,"S2, %d, %d, %d, %d, %d, %d\n",i+1,info.S2[i].sta_time, info.S2[i].end_time, info.S2[i].C, info.S2[i].T, info.S2[i].D);
         write_size = write(fd, my_buf, strlen(my_buf));
     }
-    // Service 3
-    for (i=0;i<FRAME_NUM;i++)
-    {
-        sprintf(my_buf,"S3, %d, %d, %d, %d, %d, %d\n",i+1,info.S3[i].sta_time, info.S3[i].end_time, info.S3[i].C, info.S3[i].T, info.S3[i].D);
-        write_size = write(fd, my_buf, strlen(my_buf));
-    }
+
     close(fd);
 }
 //*****************************************************************************
@@ -335,6 +325,7 @@ int capture_write(int dev, char * filename);
 //
 //*****************************************************************************
 pthread_mutex_t timer_flag;
+pthread_mutex_t image_lock;
 static inline void timespec_add( struct timespec *result,
                         const struct timespec *ts_1, const struct timespec *ts_2)
 {
@@ -396,7 +387,86 @@ int init_periodic_timer (timer_t * timerid, time_t second, long msec)
 
     return 0;
 }
+//*****************************************************************************
+//
+// Network
+//
+//*****************************************************************************
+struct addrinfo * res;
+int sockfd;
+void send_thread(char * filename)
+{
+    struct addrinfo * p = res;
+    // inifite while loop for sending image
+    int error_code = 0;
+    /* Obtain timer_flag */
+    pthread_mutex_lock(&image_lock);
 
+    /* Open image file at /var/tmp/cap_stamped.ppm */
+    int fd = open(filename,
+            O_RDONLY,
+            S_IRWXU|S_IRWXG|S_IRWXO);
+
+
+    /* Read all content */
+    // create a buffer for sending message
+    void * local_buf = malloc(BUF_SIZE);
+    if(local_buf == NULL)
+    {
+        printf("no more space\n");
+    }
+    int num_read = 1;
+    bool EOF_flag = false;
+    ssize_t read_size;
+    ssize_t total_read_size;// assume ssize_t never overflow
+    while(EOF_flag==false)
+    {
+        read_size = read(fd, (local_buf+(num_read-1)*BUF_SIZE), (size_t) BUF_SIZE);
+        if(read_size < 0)
+        {
+            printf("error while reading capture image");
+        }
+        // update total_size
+        total_read_size = ((num_read-1)*BUF_SIZE)+read_size;
+        if(read_size < BUF_SIZE)
+        {
+            EOF_flag = true;
+        }
+        else
+        {
+            num_read++;
+            local_buf = realloc(local_buf,num_read*BUF_SIZE);
+            if(local_buf == NULL)
+            {
+                printf("no more space\n");
+            }
+        }
+    }
+    /* Add '\n''#''EOF' at the end of buffer */
+    total_read_size = total_read_size + 3;
+    local_buf = realloc(local_buf,total_read_size);
+    ((char *)local_buf)[total_read_size-3] = '\n';
+    ((char *)local_buf)[total_read_size-2] = '#';
+    ((char *)local_buf)[total_read_size-1] = 0x4;
+
+    /* Close /var/tmp/cap_stamped.ppm */
+    error_code = close(fd);
+
+
+
+    /* Send image to Sam over TCP */
+    ssize_t send_size = send(sockfd,local_buf,total_read_size,0);
+    if(send_size < 0)
+    {
+        printf("error while reading capture image");
+    }
+    syslog(LOG_USER, "Image sent:send_size = %ld",send_size);
+
+
+    // free local_buf
+    free(local_buf);
+
+}
 
 int abortTest=FALSE;
 int abortS1=FALSE, abortS2=FALSE, abortS3=FALSE;
@@ -414,13 +484,47 @@ void *Sequencer(void *threadp);
 
 void *Service_1(void *threadp);
 void *Service_2(void *threadp);
-void *Service_3(void *threadp);
 double getTimeMsec(void);
 void print_scheduler(void);
 
 
 void main(void)
 {
+    /********************************************************************************/
+    /**************************** Network section ***********************************/
+
+    // Use getaddrinfo to get socket_addr
+    struct addrinfo hints;
+    memset(&hints,0,sizeof(struct addrinfo));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+    //CHUTAO_IP_ADDR
+    int error_code = getaddrinfo(NULL, PORT, &hints, &res);
+    // Check for error
+    if (error_code != 0)
+    {
+        // Use errno to print error
+        perror("getaddrinfo error");
+        // Use gai_strerror
+        printf("%s",gai_strerror(error_code));
+        exit(1);
+    }
+
+    if((sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1){
+            perror("client: socket");
+    }
+
+    /* Connect to Target ip else just dont send anything*/
+    if(connect(sockfd, res->ai_addr, res->ai_addrlen) == -1)
+    {
+        close(sockfd);
+        perror("client: connection failed");
+    }
+
+
+
+    /********************************************************************************/
     struct timeval current_time_val;
     int i, rc, scope;
     cpu_set_t threadcpu;
@@ -529,15 +633,6 @@ void main(void)
         printf("pthread_create successful for service 2\n");
 
 
-    // Service_3 = RT_MAX-3	@ 0.5 Hz
-    //
-    rt_param[3].sched_priority=rt_max_prio-3;
-    pthread_attr_setschedparam(&rt_sched_attr[3], &rt_param[3]);
-    rc=pthread_create(&threads[3], &rt_sched_attr[3], Service_3, (void *)&(threadParams[3]));
-    if(rc < 0)
-        perror("pthread_create for service 3");
-    else
-        printf("pthread_create successful for service 3\n");
 
 
     // Wait for service threads to initialize and await release by sequencer.
@@ -565,7 +660,11 @@ void main(void)
 
     for(i=0;i<NUM_THREADS;i++)
         pthread_join(threads[i], NULL);
+    
+    close(sockfd);
+    // freeaddrinfo so that no memory leak
 
+    freeaddrinfo(res);
     print_all_info();
 
     print_all_info_to_csv();
@@ -593,6 +692,8 @@ void *Sequencer(void *threadp)
 
     pthread_mutex_init(&timer_flag, NULL);
     pthread_mutex_lock(&timer_flag);
+    pthread_mutex_init(&image_lock, NULL);
+    pthread_mutex_lock(&image_lock);
     // Initialize the timer for period PERIOD_T sec
     timer_t timer_id = NULL;
     int error_code = init_periodic_timer(&timer_id,SEQ_IN_SEC,SEQ_PERIOD_MSEC);
@@ -622,9 +723,6 @@ void *Sequencer(void *threadp)
 
         // Service_2 = RT_MAX-2	@ 1 Hz
         if((seqCnt % SEV2_RATIO) == 0) sem_post(&semS2);
-
-        // Service_3 = RT_MAX-3	@ 1 Hz
-        if((seqCnt % SEV3_RATIO) == 0) sem_post(&semS3);
 
         gettimeofday(&end_timeval, (struct timezone *)0);
         rebase_timeval(&end_timeval,&start_time_val);
@@ -673,13 +771,13 @@ void *Service_1(void *threadp)
         rebase_timeval(&sta_timeval,&start_time_val);
         info.S1[S1Cnt].sta_time = time_val_to_msec(sta_timeval);
         info.S1[S1Cnt].T = SEV1_PERIOD_MSEC;
-        info.S1[S1Cnt].D = D_calculate(info.S1[S1Cnt].sta_time,SEV3_PERIOD_MSEC);
+        info.S1[S1Cnt].D = D_calculate(info.S1[S1Cnt].sta_time,SEV1_PERIOD_MSEC);
 
         // workload here
         char filename[30];
         sprintf(filename, "./images/cap_%06lld.ppm",S1Cnt);
         capture_write(0, filename);
-
+        pthread_mutex_unlock(&image_lock);
 
         gettimeofday(&end_timeval, (struct timezone *)0);
         rebase_timeval(&end_timeval,&start_time_val);
@@ -710,15 +808,17 @@ void *Service_2(void *threadp)
     while(!abortS2)
     {
         sem_wait(&semS2);
+        pthread_mutex_lock(&image_lock);
         gettimeofday(&sta_timeval, (struct timezone *)0);
         rebase_timeval(&sta_timeval,&start_time_val);
         info.S2[S2Cnt].sta_time = time_val_to_msec(sta_timeval);
         info.S2[S2Cnt].T = SEV2_PERIOD_MSEC;
-        info.S2[S2Cnt].D = D_calculate(info.S2[S2Cnt].sta_time,SEV3_PERIOD_MSEC);
+        info.S2[S2Cnt].D = D_calculate(info.S2[S2Cnt].sta_time,SEV2_PERIOD_MSEC);
 
         // workload here
-        int i;
-        for(i=0;i<10000000;i++);
+        char filename[30];
+        sprintf(filename, "./images/cap_%06lld.ppm",S2Cnt);
+        send_thread(filename);
 
         gettimeofday(&end_timeval, (struct timezone *)0);
         rebase_timeval(&end_timeval,&start_time_val);
@@ -731,42 +831,6 @@ void *Service_2(void *threadp)
     pthread_exit((void *)0);    
 }
 
-void *Service_3(void *threadp)
-{
-    struct timeval current_time_val;
-    double current_time;
-    unsigned long long S3Cnt=0;
-    threadParams_t *threadParams = (threadParams_t *)threadp;
-
-    gettimeofday(&current_time_val, (struct timezone *)0);
-    syslog(LOG_CRIT, "Difference Image Proc thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-    printf("Difference Image Proc thread @ sec=%d, usec=%d\n", (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-
-    struct timeval sta_timeval;
-    struct timeval end_timeval;
-    while(!abortS3)
-    {
-        sem_wait(&semS3);
-        gettimeofday(&sta_timeval, (struct timezone *)0);
-        rebase_timeval(&sta_timeval,&start_time_val);
-        info.S3[S3Cnt].sta_time = time_val_to_msec(sta_timeval);
-        info.S3[S3Cnt].T = SEV3_PERIOD_MSEC;
-        info.S3[S3Cnt].D = D_calculate(info.S3[S3Cnt].sta_time,SEV3_PERIOD_MSEC);
-
-        // workload here
-        int i;
-        for(i=0;i<10000000;i++);
-
-        gettimeofday(&end_timeval, (struct timezone *)0);
-        rebase_timeval(&end_timeval,&start_time_val);
-        info.S3[S3Cnt].end_time = time_val_to_msec(end_timeval);
-        info.S3[S3Cnt].C = C_calculate(info.S3[S3Cnt].sta_time, info.S3[S3Cnt].end_time);
-        S3Cnt++;
-        syslog(LOG_CRIT, "Difference Image Proc release %llu @ sec=%d, msec=%d\n", S3Cnt, (int)(current_time_val.tv_sec-start_time_val.tv_sec), (int)current_time_val.tv_usec/USEC_PER_MSEC);
-    }
-
-    pthread_exit((void *)0);
-}
 
 
 double getTimeMsec(void)
