@@ -124,8 +124,8 @@
 // void Service_6(void *threadp);
 // void Service_7(void *threadp);
 
-#define FRAME_NUM 10
-#define SEQ_NUM 10
+#define FRAME_NUM 2000
+#define SEQ_NUM 2000
 
 
 #ifdef SEQ_HZ_LARGER_THAN_1
