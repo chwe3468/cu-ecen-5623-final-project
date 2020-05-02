@@ -322,9 +322,18 @@ void print_all_info_to_csv(void)
     }
     close(fd);
 }
+//*****************************************************************************
+//
+// Capture related
+//
+//*****************************************************************************
+int capture_write(int dev, char * filename);
 
-
-
+//*****************************************************************************
+//
+// Timer related
+//
+//*****************************************************************************
 pthread_mutex_t timer_flag;
 static inline void timespec_add( struct timespec *result,
                         const struct timespec *ts_1, const struct timespec *ts_2)
@@ -667,8 +676,9 @@ void *Service_1(void *threadp)
         info.S1[S1Cnt].D = D_calculate(info.S1[S1Cnt].sta_time,SEV3_PERIOD_MSEC);
 
         // workload here
-        int i;
-        for(i=0;i<10000000;i++);
+        char filename[30];
+        sprintf(filename, "./images/cap_%06lld.ppm",S1Cnt);
+        capture_write(0, filename);
 
 
         gettimeofday(&end_timeval, (struct timezone *)0);

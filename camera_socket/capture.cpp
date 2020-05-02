@@ -27,15 +27,18 @@
 #include <unistd.h>
 
 
-#define CAPTURE_APP
+//#define CAPTURE_APP
 #define PPM_HEADER_SIZE 3
 #define BUF_SIZE 925696
 #define NUM_CPU_CORES 1
-//#define DATE_TIME
-//#define SEC_MSEC_TIME
+#define DATE_TIME
+#define SEC_MSEC_TIME
+
+
+#define COMMENT_IN_IMAGE
 
 using namespace cv;
-//extern "C" int capture_write(int);
+extern "C" int capture_write(int dev, char * filename);
 int capture_write(int dev, char * filename)
 {
     struct timeval start_timeval;
@@ -69,8 +72,7 @@ int capture_write(int dev, char * filename)
 #ifdef DATE_TIME
     tmp = localtime( &(current_time_val.tv_sec));
     // using strftime to display time
-    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n sec=%d, msec=%d\n", tmp,(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
-    sscanf();
+    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n", tmp);
     size_t str_size = strlen(MY_TIME);
     putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
 #endif
@@ -78,9 +80,9 @@ int capture_write(int dev, char * filename)
 
 #ifdef SEC_MSEC_TIME
     // using strftime to display time
-    sprintf(MY_TIME, "# sec=%d, msec=%d\n",(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
-    size_t str_size = strlen(MY_TIME);
-    putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
+    sprintf(MY_SUB_TIME, "# sec=%d, msec=%d\n",(int)current_time_val.tv_sec,(int)current_time_val.tv_usec/1000);
+    size_t str_sub_size = strlen(MY_SUB_TIME);
+    putText(frame,MY_SUB_TIME,Point(10, 80),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
 #endif
 
 
@@ -165,7 +167,7 @@ int capture_write(int dev, char * filename)
         // Use errno to print error
         perror("PPM Header write error");
     }
-
+#ifdef DATE_TIME
     // using strftime to display time
     write_size = write(fd, MY_TIME, (size_t) str_size);
     // Check for error
@@ -175,6 +177,19 @@ int capture_write(int dev, char * filename)
         perror("timestamp write error");
         //exit(1);
     }
+#endif
+
+#ifdef SEC_MSEC_TIME
+    // using strftime to display sub time
+    write_size = write(fd, MY_SUB_TIME, (size_t) str_sub_size);
+    // Check for error
+    if (write_size != str_sub_size)
+    {
+        // Use errno to print error
+        perror("timestamp write error");
+        //exit(1);
+    }
+#endif
     write_size = write(fd, ((char *)local_buf)+PPM_HEADER_SIZE, (size_t) total_read_size-PPM_HEADER_SIZE);
     // Check for error
     if (write_size < total_read_size-PPM_HEADER_SIZE)
@@ -183,6 +198,9 @@ int capture_write(int dev, char * filename)
         perror("ppm write error");
         //exit(1);
     }
+
+
+
 
 
     error_code = close(fd);
