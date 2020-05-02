@@ -145,6 +145,30 @@ int capture_write(int dev, char * filename)
         perror("PPM Header write error");
     }
 
+    // using strftime to display time
+    write_size = write(fd, MY_TIME, (size_t) str_size);
+    // Check for error
+    if (write_size != str_size)
+    {
+        // Use errno to print error
+        perror("timestamp write error");
+        //exit(1);
+    }
+    write_size = write(fd, ((char *)local_buf)+PPM_HEADER_SIZE, (size_t) total_read_size-PPM_HEADER_SIZE);
+    // Check for error
+    if (write_size < total_read_size-PPM_HEADER_SIZE)
+    {
+        // Use errno to print error
+        perror("ppm write error");
+        //exit(1);
+    }
+
+    error_code = close(fd);
+    if (error_code != 0)
+    {
+        perror("close file error");
+    }
+
 
 
     // the camera will be deinitialized automatically in VideoCapture destructor
