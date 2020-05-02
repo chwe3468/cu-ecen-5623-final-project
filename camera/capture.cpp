@@ -23,7 +23,7 @@
 #include "opencv2/opencv.hpp"
 
 // Time related
-#include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 
@@ -52,11 +52,11 @@ int capture_write(int dev, char * filename)
 
 
     /* Add timestamp directly in image */
-    time_t t ;
     struct tm *tmp ;
     char MY_TIME[100];
-    time( &t );
-    tmp = localtime( &t );
+    struct timeval current_time_val;
+    gettimeofday(&current_time_val, (struct timezone *)0);
+    tmp = localtime( &(current_time_val.tv_sec));
     // using strftime to display time
     strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n", tmp);
     size_t str_size = strlen(MY_TIME);
