@@ -58,7 +58,7 @@ int capture_write(int dev, char * filename)
     gettimeofday(&current_time_val, (struct timezone *)0);
     tmp = localtime( &(current_time_val.tv_sec));
     // using strftime to display time
-    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n", tmp);
+    strftime(MY_TIME, sizeof(MY_TIME), "#timestamp:%a, %d %b %Y %T %z \n sec=%d, msec=%d\n", tmp,(int)current_time_val.tv_sec,(int)current_time_val.tv_nsec/1000000);
     size_t str_size = strlen(MY_TIME);
     putText(frame,MY_TIME,Point(10, 40),FONT_HERSHEY_SIMPLEX,0.8,Scalar(255, 255, 255),2);  
 
